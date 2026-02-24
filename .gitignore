@@ -1,0 +1,9 @@
+# Environments
+venv/
+.env
+
+# Python Cache
+__pycache__/
+
+# Local Agent Data
+sarvagya_tasks.json

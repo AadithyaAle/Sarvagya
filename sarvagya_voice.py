@@ -1,9 +1,22 @@
 import asyncio
 import pyaudio
 import cv2  
-import sarvagya_tools  # <-- Added the tools file
+import os
+import time
+import sarvagya_tools 
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+
+#loading the vault grabing the key 
+load_dotenv()
+my_key = os.getenv("GEMINI_API_KEY")
+
+if not my_key:
+    print("❌ ERROR: Could not find GEMINI_API_KEY! Check your .env file.")
+    exit()
+
+client = genai.Client(api_key=my_key)
 
 # 1. Audio Configuration
 FORMAT = pyaudio.paInt16
@@ -11,8 +24,6 @@ CHANNELS = 1
 RATE_IN = 16000  
 RATE_OUT = 24000 
 CHUNK = 512
-
-client = genai.Client()
 
 async def audio_video_loop():
     p = pyaudio.PyAudio()
@@ -25,9 +36,9 @@ async def audio_video_loop():
 
     # 2. Define Tools for the AI
     tools_config = [
-        sarvagya_tools.search_web,
         sarvagya_tools.update_todo,
-        sarvagya_tools.create_file
+        sarvagya_tools.create_file,
+        types.Tool(google_search=types.GoogleSearch())  
     ]
 
     # Set up the Agent's Identity
@@ -104,24 +115,35 @@ async def audio_video_loop():
                 print(f"Speaker/Tool error: {e}")
 
         # Task 3: The Third Eye (Webcam)
+        # Task 3: The Third Eye (Webcam) - Smooth Version
         async def send_video():
             cap = cv2.VideoCapture(0)
             try:
+                last_sent = 0
                 while True:
+                    # Read the camera as fast as possible to clear the buffer
                     ret, frame = cap.read()
                     if not ret:
-                        break
+                        await asyncio.sleep(0.01)
+                        continue
                     
+                    # Display the smooth, real-time feed on your monitor
                     cv2.imshow("Sarvagya: Third Eye View", frame)
                     cv2.waitKey(1)
                     
-                    frame = cv2.resize(frame, (768, 768)) 
-                    _, buffer = cv2.imencode('.jpg', frame)
+                    # Only transmit to Gemini once every 1 second
+                    now = time.time()
+                    if now - last_sent >= 1.0:
+                        frame_resized = cv2.resize(frame, (768, 768)) 
+                        _, buffer = cv2.imencode('.jpg', frame_resized)
+                        
+                        await session.send_realtime_input(
+                            media=types.Blob(data=buffer.tobytes(), mime_type="image/jpeg") 
+                        )
+                        last_sent = now
                     
-                    await session.send_realtime_input(
-                        media=types.Blob(data=buffer.tobytes(), mime_type="image/jpeg") 
-                    )
-                    await asyncio.sleep(1.0) 
+                    # Yield control to the audio tasks without lagging the camera
+                    await asyncio.sleep(0.01) 
             except Exception as e:
                 print(f"Camera error: {e}")
             finally:
